@@ -70,6 +70,65 @@ static int iperf_show_socket_error_reason(const char *str, int sockfd)
     return err;
 }
 
+static void iperf_set_ip_tos(int sockfd)
+{
+    const uint8_t* ip_tos = s_iperf_ctrl.cfg.ip_tos;
+    uint32_t tos;
+    size_t optlen = sizeof(tos);
+
+    if (getsockopt(sockfd, IPPROTO_IP, IP_TOS, (char*) &tos, &optlen) < 0) {
+        iperf_show_socket_error_reason("set IP tos", sockfd);
+        return;
+    }
+
+    if (!memcmp(ip_tos, "TID0", sizeof("TID0"))) {
+        tos |= 0x00;
+    } else if (!memcmp(ip_tos, "TID1", sizeof("TID1"))) {
+        tos |= 0x20;
+    } else if (!memcmp(ip_tos, "TID2", sizeof("TID2"))) {
+        tos |= 0x40;
+    } else if (!memcmp(ip_tos, "TID3", sizeof("TID3"))) {
+        tos |= 0x60;
+    } else if (!memcmp(ip_tos, "TID4", sizeof("TID4"))) {
+        tos |= 0x80;
+    } else if (!memcmp(ip_tos, "TID5", sizeof("TID5"))) {
+        tos |= 0xA0;
+    } else if (!memcmp(ip_tos, "TID6", sizeof("TID6"))) {
+        tos |= 0xC0;
+    } else if (!memcmp(ip_tos, "TID7", sizeof("TID7"))) {
+        tos |= 0xE0;
+    } else {
+        ESP_LOGE(TAG, "Invalid parameter");
+    }
+
+    if (setsockopt(sockfd, IPPROTO_IP, IP_TOS, (const char*) &tos, optlen) < 0) {
+        iperf_show_socket_error_reason("set IP tos", sockfd);
+    } else {
+        ESP_LOGI(TAG, "set IP tos SUCCESS");
+    }
+
+    return;
+}
+
+static void iperf_set_tcp_win_size(int sockfd, bool insend)
+{ 
+    uint32_t tcp_win = s_iperf_ctrl.cfg.tcp_win_size;
+    size_t optlen = sizeof(tcp_win);
+
+    if (!insend) {
+        if (setsockopt(sockfd, SOL_SOCKET, SO_RCVBUF,(const char*) &tcp_win, optlen) < 0) {
+            ESP_LOGE(TAG, "setsockopt(TCP RX window) failed");
+        }
+    } else {
+        if (setsockopt(sockfd, SOL_SOCKET, SO_SNDBUF,(const char*) &tcp_win, optlen) < 0) {
+            ESP_LOGE(TAG, "setsockopt(TCP TX window) failed");
+        }
+    }
+
+    return;
+
+}
+
 static void iperf_report_task(void *arg)
 {
     uint32_t interval = s_iperf_ctrl.cfg.interval;
@@ -133,6 +192,14 @@ static esp_err_t IRAM_ATTR iperf_run_tcp_server(void)
     }
 
     setsockopt(listen_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    
+    if (s_iperf_ctrl.cfg.flag & IPERF_FLAG_IPTOS) {
+        iperf_set_ip_tos(listen_socket);
+    }
+ 
+    if (s_iperf_ctrl.cfg.flag & IPERF_FLAG_TCP_WIN) {
+        iperf_set_tcp_win_size(listen_socket, false);
+    }
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(s_iperf_ctrl.cfg.sport);
@@ -169,7 +236,7 @@ static esp_err_t IRAM_ATTR iperf_run_tcp_server(void)
 
         while (!s_iperf_ctrl.finish) {
             actual_recv = recv(sockfd, buffer, want_recv, 0);
-            if (actual_recv < 0) {
+            if (actual_recv <= 0) {
                 iperf_show_socket_error_reason("tcp server recv", listen_socket);
                 s_iperf_ctrl.finish = true;
                 break;
@@ -205,6 +272,10 @@ static esp_err_t IRAM_ATTR iperf_run_udp_server(void)
     }
 
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    
+    if (s_iperf_ctrl.cfg.flag & IPERF_FLAG_IPTOS) {
+        iperf_set_ip_tos(sockfd);
+    }
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(s_iperf_ctrl.cfg.sport);
@@ -262,8 +333,11 @@ static esp_err_t iperf_run_udp_client(void)
         iperf_show_socket_error_reason("udp client create", sockfd);
         return ESP_FAIL;
     }
-
     setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    
+    if (s_iperf_ctrl.cfg.flag & IPERF_FLAG_IPTOS) {
+        iperf_set_ip_tos(sockfd);
+    }
 
     addr.sin_family = AF_INET;
     addr.sin_port = htons(s_iperf_ctrl.cfg.dport);
@@ -321,11 +395,21 @@ static esp_err_t iperf_run_tcp_client(void)
         iperf_show_socket_error_reason("tcp client create", sockfd);
         return ESP_FAIL;
     }
+    
+    if (s_iperf_ctrl.cfg.flag & IPERF_FLAG_IPTOS) {
+        iperf_set_ip_tos(sockfd);
+    }
 
+/* TODO:Lwip has not yet implemented SO_SNDBUF */
+    /*  if (s_iperf_ctrl.cfg.flag & IPERF_FLAG_TCP_WIN) {
+        iperf_set_tcp_win_size(sockfd, true);
+    } */
+    
     memset(&remote_addr, 0, sizeof(remote_addr));
     remote_addr.sin_family = AF_INET;
     remote_addr.sin_port = htons(s_iperf_ctrl.cfg.dport);
     remote_addr.sin_addr.s_addr = s_iperf_ctrl.cfg.dip;
+
     if (connect(sockfd, (struct sockaddr *)&remote_addr, sizeof(remote_addr)) < 0) {
         iperf_show_socket_error_reason("tcp client connect", sockfd);
         return ESP_FAIL;

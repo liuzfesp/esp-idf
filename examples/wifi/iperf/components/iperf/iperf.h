@@ -17,14 +17,18 @@ extern "C" {
 #include "esp_types.h"
 #include "esp_err.h"
 
-#define IPERF_FLAG_CLIENT (1)
-#define IPERF_FLAG_SERVER (1 << 1)
-#define IPERF_FLAG_TCP (1 << 2)
-#define IPERF_FLAG_UDP (1 << 3)
+#define IPERF_FLAG_CLIENT            (1 << 0)
+#define IPERF_FLAG_SERVER            (1 << 1)
+#define IPERF_FLAG_TCP               (1 << 2)
+#define IPERF_FLAG_UDP               (1 << 3)
+#define IPERF_FLAG_IPTOS             (1 << 4)
+#define IPERF_FLAG_TCP_WIN           (1 << 5)
 
 #define IPERF_DEFAULT_PORT 5001
 #define IPERF_DEFAULT_INTERVAL 3
 #define IPERF_DEFAULT_TIME 30
+#define IPERF_TCP_MAX_WIN_SIZE 65535
+#define IPERF_TCP_MIN_WIN_SIZE 2440
 
 #define IPERF_TRAFFIC_TASK_NAME "iperf_traffic"
 #define IPERF_TRAFFIC_TASK_PRIORITY 10
@@ -52,6 +56,8 @@ typedef struct {
     uint16_t sport;
     uint32_t interval;
     uint32_t time;
+    uint8_t* ip_tos;
+    uint32_t tcp_win_size;
 } iperf_cfg_t;
 
 esp_err_t iperf_start(iperf_cfg_t *cfg);
